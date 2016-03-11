@@ -1,0 +1,22 @@
+Package: GPMrain
+Type: Package
+Title: Extraction and Rainfall Modelling using GPM-IMERG
+Version: 0.1
+Date: 2016-03-01
+Author: Bastian Manz
+Maintainer: Bastian Manz <bastian.manz10@imperial.ac.uk>
+Description: This package offer users a set of tools to download GPM-IMERG production and NRT data and convert it into a Spacetime-object in R. Furthermore, it offers a set of tools for colocating and evaluating GPM-IMERG pixels against rain gauges. Lastly, a double kriging implementation allows for generating ground-based rainfall fields and an error-weighted merging method allows for combining rain gauges with GPM-IMERG.
+License: GPL-3
+LazyData: TRUE
+Depends:
+    R (>= 3.2.3)
+Imports:
+    sp,
+    rgdal,
+    zoo,
+    xts,
+    spacetime,
+    gstat,
+    RCurl,
+    rhdf5
+RoxygenNote: 5.0.1

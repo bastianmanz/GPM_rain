@@ -1,0 +1,431 @@
+## El R-package ("GPMrain") ofrece herramientas para la descarga, la gestion, la interpretacion y el analisis de datos de GPM-IMERG (Global Precipitation Measurement - Integrated Multi-satellitE Retrievals for GPM) y datos pluviometriocs
+## 
+## Este README contiene tres tutoriales que muestran la funcionalidad de del paquete GPMrain. Mas detalles sobre las funciones estan en la documentacion propria del paquete GPMrain. Tambien consultan el PDF del taller del GPM IMERG en Lima en Feb 2016: esto esta un comentario a este tutorial. 
+## Autor: Bastian Manz, Imperial College London
+## Fecha: 11/03/2016
+## Uso: libre, licencia GPL-3
+
+## Tutorial 1 (descarga de GPM-IMERG y conversion a RData)
+
+rm(list=ls())
+gc()
+setwd("C:/GPM_Workshop/GPM_R") # su directorio local
+Sys.setenv(TZ='UTC')
+
+## instalar y cargar el paquete GPMrain
+library(devtools)
+install_github("bastianmanz/GPMrain")
+library(GPMrain)
+
+#######################
+# 1: Descargar GPM-IMERG con wget o curl (System_Download)
+# parametros:
+# product: Que producto de GPM-IMERG se requiere: "nrt" (near- real time) o "production"
+# nrt_type: Que producto de NRT se requiere: "early" o "late"
+# method: Que metodo/ herramienta de descarga ("wget" o "curl"). Aseguran que estan instaladas en su maquina.
+# obtener lista de archivos: http://pmm.nasa.gov/data-access/downloads/gpm (ver instrucciones en los slides)
+
+data(production_url_list) # ejemplo de la lista de archivos de GPM IMERG HDF5 incluyendo NASA http URL
+product <- "production"
+method <- "wget"
+system_download(method,download_list=production_url_list) # Ver detalles en la documentacion de esta funciona!
+
+#######################
+# 2: Descargar con RCurl (R_Download)/ ALTERNATIVA A "system_download"
+# parametros:
+# product: Que producto de GPM-IMERG se require: "nrt" (near- real time) o "production"
+# nrt_type: Que producto de NRT se requiere: "early" o "late"
+# start: fecha de inicio (formate: YYYYMMDD)
+# end: fecha de termino (formate: YYYYMMDD)
+# userpwd: registre su direccion de correo electronico aqui:
+# http://registration.pps.eosdis.nasa.gov/registration/newContact.html
+# nombre de usario == clave == su direccion de correo electronico
+
+data(production_url_list) # ejemplo de la lista de archivos de GPM IMERG HDF5 incluyendo NASA http URL
+product <- "production"
+userpwd <- "you(at)email:you(at)email" # "direccion_de_correo:direccion_de_correo"
+rcurl_download(product,nrt_type,start,end,userpwd)
+
+#######################
+# 3: Convertir .HDF5 a .RData
+# parametros:
+# file_list: asegurar que el archivo "file_list_-----.txt" ha sido generado.
+# product: Que producto de GPM-IMERG se requiere: "nrt" (near- real time) o "production"
+# nrt_product: Que producto de NRT se requiere: "early" o "late"
+# bbox: definir la extension espacial
+# download_type:"system" o "rcurl"
+
+data(production_url_list) # ejemplo de la lista de archivos de GPM IMERG HDF5 incluyendo NASA http URL
+product <- "production"
+bbox <- c(-6,-4,-80,-78)
+download_type <-"rcurl"
+gpm <- hdf2R(product, nrt_product, bbox,download_type)
+
+##########################################################################################################
+## Tutorial 2 (trabajar con datos de GPM-IMERG en R, analisis de GPM-IMERG y estaciones pluviometricas) ##
+##########################################################################################################
+
+rm(list=ls())
+gc()
+setwd("C:/GPM_Workshop/GPM_R") # su directorio local
+Sys.setenv(TZ='UTC')
+
+# GPMrain instalado?
+library(hydroGOF) # estadisticas de rendimiento
+library(colorRamps) # definir colores
+
+#############################################################
+# 1. Ingreso de datos:
+# - leer los datos de GPM-IMERG (siguiendo tutorial 1)
+# - leer los datos pluviometricos
+# - datos pluviometricos: convertir zona horaria, projeccion espacial, colocacion 
+#############################################################
+
+data(gpm.hh.piura) # leer los datos de GPM-IMERG para la region de Piura, Peru
+gpm <- gpm.hh.piura
+data(gauges.hh.piura) # leer los datos pluviometricos
+gauges <- gauges.hh.piura
+
+## convertir los datos en objeto "spacetime" (3-Dimensional)
+## parametros:
+## projection - tipo de projeccion espacial 
+## timezone - valor numerico de la desviacion temporal con respecto a UTC (por ejemplo, Peru: -5)
+
+gauges <- spacetime_gauge(gauges,projection="+proj=longlat +ellps=WGS84 +datum=WGS84", timezone=-5)
+
+## colocacion de los pluviometros con los pixeles de GPM
+## parametros:
+## resolution - resolucion espacial de los datos satelitales (por ejemplo, GPM: 0.1 grados)
+## longlat - coordenadas en latitud/ longitud ("TRUE") o en una projeccion metrica ("FALSE")?
+
+gauges <- colocate(gauges,gpm,resolution=0.1,longlat=TRUE)
+
+####################################################
+# 2. Analisis y exploracion de los datos:
+# - plotear mapas espaciales
+# - series de tiempo
+# - estadisticas de rendimiento (RMSE,pbias,NSE,cor)
+# - distribuciones estadisticas
+####################################################
+
+# extraer la informacion espacial
+gauge.sp <- gauges@sp
+gpm.sp <- gpm@sp
+
+# explorar datos espaciales
+summary(gauge.sp)
+summary(gpm.sp)
+
+# extraer informacion temporal
+gauge.ts <- as(gauges[,,1],"xts")
+colnames(gauge.ts) <- gauge.sp$estacion
+gpm.ts <- gpm2ts(gpm,gauge.ts) # convertir gpm STFDF a xts, zoo. Mas eficiente que gpm.ts <- as(gpm[,,1],"xts")
+
+# explorar datos temporales
+summary(gauge.ts[,1:5])  # mm/hr y cambio de fecha! Ahora en UTC.
+summary(gpm.ts[,1:5])    # mm/hr!
+
+# visualizar mapas espaciales
+# patrones espaciales de una marca de tiempo (2014-04-01 00:00:00)
+gpm.sp@data <- data.frame(gpm.sp@data,marzo_31=as.numeric(gpm.ts[1,]))
+spplot(gpm.sp, scales=list(draw=TRUE), zcol="marzo_31")
+gridded(gpm.sp)=TRUE # convertir red de puntos a pixeles regulares
+spplot(gpm.sp, scales=list(draw=TRUE), zcol="marzo_31")
+
+# patrones espaciales de la accumulacion total sobre un periodo (mm/ hr)
+gpm.sp@data <- data.frame(gpm.sp@data,accum=colMeans(gpm.ts,na.rm=T))
+spplot(gpm.sp, scales=list(draw=TRUE), zcol="accum")
+
+# visualizar series de tiempo
+mons <- c("Abr","Mayo","Jun")
+
+plot(gauge.ts[,1],
+     xaxt="n",
+     ylab=expression("Tasa de precipitacion "*" (mm hr"^{-1}*")"),
+     xlab="Time",
+     main=gauge.sp@data$estacion[1])
+axis(1, at=index(gauge.ts)[round(seq(1,nrow(gauge.ts),length.out=3))], labels=mons)
+
+# obtener pixel colocado del grid del GPM
+gpm.coloc.ts <- gpm.ts[,gauge.sp@data$GPM_PIXEL[1]]
+lines(gpm.coloc.ts,col="red")
+
+# calcular promedio de todos los pluviometros colocadas y memorizar como serie de tiempo
+gauge.avg.ts <- as.xts(zoo(rowMeans(gpm.ts[,which(gauge.sp@data$GPM_PIXEL == gauge.sp@data$GPM_PIXEL[1])],na.rm=T),index(gpm.ts)))
+
+# visualizar en mismo grafico
+lines(gauge.avg.ts,col="blue")
+
+# anadir leyenda
+legend(x=min(index(gauge.ts[,1])),y=25, pch = rep(15,3),
+       pt.bg = c("black","blue","red"),
+       col = c("black","blue","red"),
+       legend = c("Pluviometro","Promedio espacial","GPM-IMERG"),
+       bty="n",cex=1,ncol=1,xjust=0.05,x.intersp=0.5)
+
+# indices de desempe?o
+#RMSE
+rmse(gpm.coloc.ts,gauge.ts[,1],na.rm=TRUE)
+rmse(gpm.coloc.ts,gauge.avg.ts,na.rm=TRUE)
+
+# Sesgo relativo
+pbias(gpm.coloc.ts,gauge.ts[,1],na.rm=TRUE)
+pbias(gpm.coloc.ts,gauge.avg.ts,na.rm=TRUE)
+
+# Eficiencia Nash-Sutcliffe
+NSE(gpm.coloc.ts,gauge.ts[,1],na.rm=TRUE)
+NSE(gpm.coloc.ts,gauge.avg.ts,na.rm=TRUE)
+
+# Correlacion
+cor(gpm.coloc.ts,gauge.ts[,1],use="na.or.complete")
+cor(gpm.coloc.ts,gauge.avg.ts,use="na.or.complete") 
+
+## Estadisticas de Distribuciones ##
+# cuantiles empiricos
+
+gauge.qt <- quantile(gauge.ts[which(gauge.ts[,1]>0),1],seq(0.01,1,0.01))
+gauge.avg.qt <- quantile(gauge.avg.ts[which(gauge.avg.ts>0)],seq(0.01,1,0.01))
+gpm.qt <- quantile(gpm.coloc.ts[which(gpm.coloc.ts>0)],seq(0.01,1,0.01))
+
+# funcion de distribucion empirica
+
+plot(gauge.qt,seq(0.01,1,0.01),
+     xlab="Tasa de Precipitacion (mm/ hr)",
+     ylab="F(x)",type="l")
+lines(gauge.avg.qt,seq(0.01,1,0.01),col="blue")
+lines(gpm.qt,seq(0.01,1,0.01),col="red")
+legend(x=15,y=0.5, pch = rep(15,3),
+       pt.bg = c("black","blue","red"),
+       col = c("black","blue","red"),
+       legend = c("Pluviometro","Promedio espacial","GPM-IMERG"),
+       bty="n",cex=1,ncol=1,xjust=0.05,x.intersp=0.5)
+
+# grafico cuantil-cuantil
+plot(gauge.qt,gauge.qt,type="l",xlab="Pluviometro (mm/hr)",ylab="Precipitacion Estimada (mm/hr)")
+lines(gauge.qt,gauge.avg.qt,col="blue")
+lines(gauge.qt,gpm.qt,col="red")
+legend(x=0,y=28, pch = rep(15,3),
+       pt.bg = c("black","blue","red"),
+       col = c("black","blue","red"),
+       legend = c("Pluviometro","Promedio espacial","GPM-IMERG"),
+       bty="n",cex=1,ncol=1,xjust=0.05,x.intersp=0.5)
+
+###################################################################################	   
+## Tutorial 3 ("Merging"/ Combinacion de GPM-IMERG con estaciones pluviometricas ##
+###################################################################################
+
+rm(list=ls())
+gc()
+setwd("C:/GPM_Workshop/GPM_R") # su directorio local
+Sys.setenv(TZ='UTC')
+
+# GPMrain instalado?
+library(hydroGOF) # estadisticas de rendimiento
+library(colorRamps) # definir colores
+
+#######################################################
+# 0. Prepara datos
+# - cargar datos GPm y estaciones
+# - colocar
+# - combinar estaciones en el mismo pixel
+# - eliminar algunas estaciones para la validaci?n cruzada (xval),
+#   despues del kriging
+#######################################################
+
+data(gpm) # STFDF object with gpm imerg observations
+data(gauges) # STFDF object with gauge observations
+gauges <- colocate(gauges,gpm,resolution=0.1,longlat=TRUE)
+gauge.sp <- gauges@sp
+gauge.ts <- as(gauges[,,1],"xts")
+colnames(gauge.ts) <- gauge.sp$estacion
+gpm.sp <- gpm@sp
+gpm.ts <- as(gpm[,,1],"xts")
+
+# combinar estaciones en el mismo pixel
+gauge.list <- combine_gauges(gauge.sp,gauge.ts)
+gauge.sp <- gauge.list$sp
+gauge.ts <- gauge.list$ts
+
+# eliminar algunas estaciones para validacion cruzada
+set.seed(42)
+xval.id <- sample(1:nrow(gauge.sp),5)
+xval.sp <- gauge.sp[xval.id,]
+xval.ts <- gauge.ts[,xval.id]
+
+gauge.sp <- gauge.sp[- xval.id,]
+gauge.ts <- gauge.ts[,- xval.id]
+
+####################################################
+# 1. Correccion del cesgo:
+# - identificar y corregir el cesgo en GPM
+####################################################
+
+gpm.bc.ts <- bias_correct(gauge.sp,gauge.ts,gpm.sp,gpm.ts)
+
+####################################################
+# 2. Ajustar modelos de variogramas climatologicas:
+# - implementar una clasificacion climatologica
+# - calcular variogramas empiricales
+# - ajustar models de variogramas climatologicas
+####################################################
+# parametro:
+# aggregation_level - clasificacion estacional ("season"), otras clasificaciones ya no estan implementadas
+ts.classification <- classify(gauge.ts,aggregation_level="season")
+
+# explorar
+summary(ts.classification)
+
+# parametro:
+# vgm.type - Ordinary Kriging (OK), Kriging with External Drift (KED) o solo los datos satelitales (SAT)
+# vgm.model - los modelos candidatos para ajustar el variograma empirical,
+# para ver todos los opciones, usar la funciona vgm(), modelos populares son "Exp","Gau","Sph".
+clim.vgms.ked <- cvgm(gauge.ts,gauge.sp,gpm.ts,gpm.sp,ts.classification,class_select=1,rain_threshold=0.001,vgm.type="KED",vgm.model=c("Exp","Gau","Sph","Mat"), class.dist=5)
+class(clim.vgms.ked)
+names(clim.vgms.ked)
+clim.vgms.ked$occ_vgm_results
+clim.vgms.ked$amts_vgm_results
+clim.vgms.ok <- cvgm(gauge.ts,gauge.sp,gpm.ts,gpm.sp,ts.classification,class_select=1,rain_threshold=0.001,vgm.type="OK",vgm.model=c("Exp","Gau","Sph","Mat"), class.dist=5)
+clim.vgms.sat <- cvgm(gauge.ts,gauge.sp,gpm.ts,gpm.sp,ts.classification,class_select=1,rain_threshold=0.001,vgm.type="SAT",vgm.model=c("Exp","Gau","Sph","Mat"), class.dist=5)
+
+dev.off()
+print(clim.vgms.ked$occ_plot[[1]], split=c(1,1,4,3), more=TRUE)
+print(clim.vgms.ked$occ_plot[[2]], split=c(2,1,4,3), more=TRUE)
+print(clim.vgms.ked$occ_plot[[3]], split=c(3,1,4,3), more=TRUE)
+print(clim.vgms.ked$occ_plot[[4]], split=c(4,1,4,3), more=TRUE)
+print(clim.vgms.ok$occ_plot[[1]], split=c(1,2,4,3), more=TRUE)
+print(clim.vgms.ok$occ_plot[[2]], split=c(2,2,4,3), more=TRUE)
+print(clim.vgms.ok$occ_plot[[3]], split=c(3,2,4,3), more=TRUE)
+print(clim.vgms.ok$occ_plot[[4]], split=c(4,2,4,3), more=TRUE)
+print(clim.vgms.sat$occ_plot[[1]], split=c(1,3,4,3), more=TRUE)
+print(clim.vgms.sat$occ_plot[[2]], split=c(2,3,4,3), more=TRUE)
+print(clim.vgms.sat$occ_plot[[3]], split=c(3,3,4,3), more=TRUE)
+print(clim.vgms.sat$occ_plot[[4]], split=c(4,3,4,3))
+
+dev.off()
+print(clim.vgms.ked$amts_plot[[1]], split=c(1,1,4,3), more=TRUE)
+print(clim.vgms.ked$amts_plot[[2]], split=c(2,1,4,3), more=TRUE)
+print(clim.vgms.ked$amts_plot[[3]], split=c(3,1,4,3), more=TRUE)
+print(clim.vgms.ked$amts_plot[[4]], split=c(4,1,4,3), more=TRUE)
+print(clim.vgms.ok$amts_plot[[1]], split=c(1,2,4,3), more=TRUE)
+print(clim.vgms.ok$amts_plot[[2]], split=c(2,2,4,3), more=TRUE)
+print(clim.vgms.ok$amts_plot[[3]], split=c(3,2,4,3), more=TRUE)
+print(clim.vgms.ok$amts_plot[[4]], split=c(4,2,4,3), more=TRUE)
+print(clim.vgms.sat$amts_plot[[1]], split=c(1,3,4,3), more=TRUE)
+print(clim.vgms.sat$amts_plot[[2]], split=c(2,3,4,3), more=TRUE)
+print(clim.vgms.sat$amts_plot[[3]], split=c(3,3,4,3), more=TRUE)
+print(clim.vgms.sat$amts_plot[[4]], split=c(4,3,4,3))
+
+######################################################
+# 3. Simulacion condicional de double kriging (DK):
+# - simulacion indicador (ocurrencia de precipitacion)
+# - simulacion Gaussiana (intensidad de precipitacion)
+######################################################
+# parametros (mismo como cvgm())
+
+dk.list <- DoubleKrige(gauge.ts,gauge.sp,gpm.ts,gpm.sp,ts.classification, clim_vgm=clim.vgms.ked,rain_threshold=0.001,vgm.type="KED")
+names(dk.list)
+
+#############################################################################
+# 4. Evaluacion de correccion de cesgo y DK:
+# - patrones espaciales, series de tiempo
+# - estadisticas y distribuciones para las estaciones de la validacion cruzada
+##############################################################################
+
+# patrones espaciales
+merged.sp <- as.data.frame(t(as.matrix(gpm.ts))) # "dk.list$Zs" o "gpm.ts" 
+colnames(merged.sp) <- paste("DK",as.numeric(format(index(dk.list$Zs),"%Y%m%d")),sep="")
+coordinates(merged.sp) <- coordinates(gpm.sp)
+proj4string(merged.sp) <- proj4string(gpm.sp)
+gridded(merged.sp)=T
+spplot(merged.sp,scales=list(draw=TRUE), zcol="DK20141215") # elegir fecha
+
+# opciones adicionales para mejorar visualizacion espacial
+stns  <- list("sp.points",gauge.sp, pch=3,  col="black", first = F, cex=1)
+stns_xval  <- list("sp.points",xval.sp, pch=1,  col="red", first = F, cex=2)
+atscale_mtly<- c(0,seq(0.1,max(merged.sp@data$DK20141215,na.rm=T),0.1))
+label_at <- c(0,seq(0.1,max(merged.sp@data$DK20141215,na.rm=T),2.5))
+label_text <- as.character(label_at)
+col_key <- list(labels=list(at = label_at,labels = label_text),space="right", height = 0.6, width = 0.8)
+col_regions <- c("white",rev(matlab.like(length(atscale_mtly)-1)))
+
+spplot(merged.sp,
+       sp.layout=list(stns,stns_xval),
+       at= atscale_mtly,
+       scales=list(draw=TRUE),
+       colorkey = col_key,col.regions=col_regions,
+       zcol="DK20141215") # elegir fecha
+
+# validacion cruzada
+ID <- xval.sp@data$GPM_PIXEL
+gpm.xval.ts <- gpm.ts[,ID]
+gpm.bc.xval.ts <- gpm.bc.ts[,ID]
+merged.xval.ts <- dk.list$Zs[,ID]
+
+# grafica de series de tiempo
+plot(x=index(xval.ts[,1]),y=as.numeric(xval.ts[,1]),
+     ylab=expression("Tasa de precipitaci?n "*" (mm day"^{-1}*")"),
+     xlab="Tiempo",
+     ylim=c(0,30),
+     main=xval.sp@data$estacion[1],type="l")
+
+lines(x=index(xval.ts[,1]),y=as.numeric(gpm.xval.ts[,1]),col="red")
+lines(x=index(xval.ts[,1]),y=as.numeric(gpm.bc.xval.ts[,1]),col="blue")
+lines(x=index(xval.ts[,1]),y=as.numeric(merged.xval.ts[,1]),col="green")
+
+# anadir leyenda
+legend(x=min(index(xval.ts[,1])),y=25, pch = rep(15,4),
+       pt.bg = c("black","red","blue","green"),
+       col = c("black","red","blue","green"),
+       legend = c("Pluviometro","GPM-IMERG","GPM-IMERG BC","DoubleKriged"),
+       bty="n",cex=1,ncol=1,xjust=0.05,x.intersp=0.5)
+
+#dev.off()
+
+# estadisticas
+# RMSE
+rmse(gpm.xval.ts[,1],xval.ts[,1],na.rm=TRUE)
+rmse(gpm.bc.xval.ts[,1],xval.ts[,1],na.rm=TRUE)
+rmse(merged.xval.ts[,1],xval.ts[,1],na.rm=TRUE)
+
+# NSE
+NSE(gpm.xval.ts[,1],xval.ts[,1],na.rm=TRUE)
+NSE(gpm.bc.xval.ts[,1],xval.ts[,1],na.rm=TRUE)
+NSE(merged.xval.ts[,1],xval.ts[,1],na.rm=TRUE)
+
+# Frecuencia de Precipitacion
+sum(xval.ts[,1]>0,na.rm=T)/sum(xval.ts[,1]>=0,na.rm=T)
+sum(gpm.xval.ts[,1]>0,na.rm=T)/sum(gpm.xval.ts[,1]>=0,na.rm=T)
+sum(gpm.bc.xval.ts[,1]>0,na.rm=T)/sum(gpm.bc.xval.ts[,1]>=0,na.rm=T)
+sum(merged.xval.ts[,1]>0,na.rm=T)/sum(merged.xval.ts[,1]>=0,na.rm=T)
+
+## Estadisticas de Distribuciones ##
+# cuantiles empiricales
+xval.qt <- quantile(xval.ts[which(xval.ts[,1]>0),1],seq(0.01,1,0.01))
+gpm.qt <- quantile(gpm.xval.ts[which(gpm.xval.ts[,1]>0),1],seq(0.01,1,0.01))
+gpm.bc.qt <- quantile(gpm.bc.xval.ts[which(gpm.bc.xval.ts[,1]>0),1],seq(0.01,1,0.01))
+merged.qt <- quantile(merged.xval.ts[which(merged.xval.ts[,1]>0),1],seq(0.01,1,0.01))
+
+# funcion de distribucion empirica
+plot(xval.qt,seq(0.01,1,0.01),
+     xlab="Tasa de Precipitacion (mm/ hr)",
+     ylab="F(x)",type="l")
+lines(gpm.qt,seq(0.01,1,0.01),col="red")
+lines(gpm.bc.qt,seq(0.01,1,0.01),col="blue")
+lines(merged.qt,seq(0.01,1,0.01),col="green")
+legend(x=10,y=0.5, pch = rep(15,4),
+       pt.bg = c("black","red","blue","green"),
+       col = c("black","red","blue","green"),
+       legend = c("Pluviometro","GPM-IMERG","GPM-IMERG BC","DoubleKriged"),
+       bty="n",cex=1,ncol=1,xjust=0.05,x.intersp=0.5)
+
+# grafico cuantil-cuantil
+plot(xval.qt,xval.qt,type="l",xlab="Pluviometro (mm/hr)",ylab="Precipitacion Estimada (mm/hr)")
+lines(xval.qt,gpm.qt,col="red")
+lines(xval.qt,gpm.bc.qt,col="blue")
+lines(xval.qt,merged.qt,col="green")
+legend(x=1,y=15, pch = rep(15,3),
+       pt.bg = c("black","red","blue","green"),
+       col = c("black","red","blue","green"),
+       legend = c("Pluviometro","GPM-IMERG","GPM-IMERG BC","DoubleKriged"),
+       bty="n",cex=1,ncol=1,xjust=0.05,x.intersp=0.5)
+
